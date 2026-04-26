@@ -1,0 +1,793 @@
+import { useState, useEffect, useRef } from "react";
+
+const CIRCLE_COUNT = 10;
+const COLORS = [
+  { name: "Cobalt Blue", hex: "#1a56db" },
+  { name: "Crimson Red", hex: "#e02424" },
+  { name: "Forest Green", hex: "#057a55" },
+  { name: "Amber", hex: "#d97706" },
+  { name: "Violet", hex: "#7e3af2" },
+  { name: "Rose", hex: "#e4538a" },
+  { name: "Teal", hex: "#0694a2" },
+  { name: "Burnt Orange", hex: "#c2500f" },
+  { name: "Slate", hex: "#4b5563" },
+  { name: "Lime", hex: "#4aab2d" },
+];
+
+function getCirclePositions(count, radius, cx, cy) {
+  return Array.from({ length: count }, (_, i) => {
+    const angle = (2 * Math.PI * i) / count - Math.PI / 2;
+    return {
+      x: cx + radius * Math.cos(angle),
+      y: cy + radius * Math.sin(angle),
+    };
+  });
+}
+
+function chiSquareTest(observed, expected) {
+  const chi2 = observed.reduce((sum, o, i) => {
+    const e = expected[i];
+    return sum + Math.pow(o - e, 2) / e;
+  }, 0);
+  const df = observed.length - 1;
+  // p-value approximation using chi-square CDF
+  // Using Wilson-Hilferty approximation
+  const p = 1 - chiSquareCDF(chi2, df);
+  return { chi2: chi2.toFixed(3), df, p: p.toFixed(4) };
+}
+
+function chiSquareCDF(x, k) {
+  if (x <= 0) return 0;
+  return regularizedGammaP(k / 2, x / 2);
+}
+
+function regularizedGammaP(a, x) {
+  if (x < 0) return 0;
+  if (x === 0) return 0;
+  if (x >= a + 1) return 1 - regularizedGammaQ(a, x);
+  let sum = 1 / a;
+  let term = 1 / a;
+  for (let n = 1; n < 200; n++) {
+    term *= x / (a + n);
+    sum += term;
+    if (Math.abs(term) < 1e-10) break;
+  }
+  return sum * Math.exp(-x + a * Math.log(x) - logGamma(a));
+}
+
+function regularizedGammaQ(a, x) {
+  let b = x + 1 - a, c = 1e30, d = 1 / b, h = d;
+  for (let i = 1; i <= 200; i++) {
+    const an = -i * (i - a);
+    b += 2;
+    d = an * d + b; if (Math.abs(d) < 1e-30) d = 1e-30;
+    c = b + an / c; if (Math.abs(c) < 1e-30) c = 1e-30;
+    d = 1 / d;
+    h *= d * c;
+    if (Math.abs(d * c - 1) < 1e-10) break;
+  }
+  return Math.exp(-x + a * Math.log(x) - logGamma(a)) * h;
+}
+
+function logGamma(z) {
+  const c = [76.18009172947146,-86.50532032941677,24.01409824083091,-1.231739572450155,0.1208650973866179e-2,-0.5395239384953e-5];
+  let y = z, x = z, tmp = x + 5.5;
+  tmp -= (x + 0.5) * Math.log(tmp);
+  let ser = 1.000000000190015;
+  for (let j = 0; j < 6; j++) { y += 1; ser += c[j] / y; }
+  return -tmp + Math.log(2.5066282746310005 * ser / x);
+}
+
+function PhaseDot({ color, label, index, onClick, selected, disabled, animDelay, x, y }) {
+  const [hovered, setHovered] = useState(false);
+  const [clicked, setClicked] = useState(false);
+
+  const handleClick = () => {
+    if (disabled) return;
+    setClicked(true);
+    setTimeout(() => setClicked(false), 300);
+    onClick(index);
+  };
+
+  return (
+    <div
+      onClick={handleClick}
+      onMouseEnter={() => !disabled && setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        position: "absolute",
+        left: x,
+        top: y,
+        transform: `translate(-50%, -50%)`,
+        cursor: disabled ? "default" : "pointer",
+        animation: `fadeIn 0.4s ease forwards`,
+        animationDelay: `${animDelay}ms`,
+        opacity: 0,
+        zIndex: selected ? 10 : 1,
+      }}
+    >
+      <div style={{
+        width: 52,
+        height: 52,
+        borderRadius: "50%",
+        background: color,
+        border: selected
+          ? "3px solid #fff"
+          : hovered
+          ? "2px solid rgba(255,255,255,0.5)"
+          : "2px solid rgba(255,255,255,0.12)",
+        boxShadow: selected
+          ? `0 0 0 4px rgba(255,255,255,0.25), 0 8px 32px rgba(0,0,0,0.5)`
+          : hovered
+          ? `0 6px 24px rgba(0,0,0,0.4)`
+          : `0 2px 12px rgba(0,0,0,0.3)`,
+        transform: clicked ? "scale(0.88)" : hovered ? "scale(1.12)" : selected ? "scale(1.08)" : "scale(1)",
+        transition: "all 0.18s cubic-bezier(0.34,1.56,0.64,1)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}>
+        {selected && (
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+            <polyline points="4,10 8,14 16,6" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        )}
+      </div>
+      {hovered && !selected && (
+        <div style={{
+          position: "absolute",
+          bottom: -28,
+          left: "50%",
+          transform: "translateX(-50%)",
+          background: "rgba(0,0,0,0.8)",
+          color: "#fff",
+          fontSize: 11,
+          padding: "3px 8px",
+          borderRadius: 6,
+          whiteSpace: "nowrap",
+          pointerEvents: "none",
+          fontFamily: "'DM Mono', monospace",
+        }}>
+          {label}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CircleArena({ phase, onPick, picked, total }) {
+  const size = 340;
+  const cx = size / 2, cy = size / 2, radius = 120;
+  const positions = getCirclePositions(CIRCLE_COUNT, radius, cx, cy);
+
+  return (
+    <div style={{ position: "relative", width: size, height: size, margin: "0 auto" }}>
+      {/* Ring guide */}
+      <svg width={size} height={size} style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none" }}>
+        <circle cx={cx} cy={cy} r={radius} fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="44" />
+        <circle cx={cx} cy={cy} r={radius} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="1" strokeDasharray="4 6" />
+      </svg>
+
+      {/* Center label */}
+      <div style={{
+        position: "absolute", left: "50%", top: "50%",
+        transform: "translate(-50%,-50%)",
+        textAlign: "center", pointerEvents: "none",
+      }}>
+        {picked === null ? (
+          <>
+            <div style={{ fontSize: 28, fontFamily: "'DM Mono', monospace", color: "rgba(255,255,255,0.15)", lineHeight: 1 }}>
+              {phase === 1 ? "◯" : "◉"}
+            </div>
+            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", fontFamily: "'DM Mono', monospace", marginTop: 4 }}>
+              pick one
+            </div>
+          </>
+        ) : (
+          <div style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", fontFamily: "'DM Mono', monospace" }}>
+            #{total} recorded
+          </div>
+        )}
+      </div>
+
+      {/* Circles */}
+      {positions.map((pos, i) => {
+        const color = phase === 1 ? "#6b7280" : COLORS[i].hex;
+        const label = phase === 1 ? `Position ${i + 1}` : COLORS[i].name;
+        return (
+          <PhaseDot
+            key={i}
+            color={color}
+            label={label}
+            index={i}
+            onClick={onPick}
+            selected={picked === i}
+            disabled={picked !== null}
+            animDelay={i * 40}
+            x={pos.x}
+            y={pos.y}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function Bar({ label, value, max, color, highlight }) {
+  const pct = max > 0 ? (value / max) * 100 : 0;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 7 }}>
+      <div style={{
+        width: 12, height: 12, borderRadius: "50%",
+        background: color, flexShrink: 0,
+        border: "1px solid rgba(255,255,255,0.2)"
+      }} />
+      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", fontFamily: "'DM Mono', monospace", width: 110, flexShrink: 0 }}>
+        {label}
+      </div>
+      <div style={{ flex: 1, background: "rgba(255,255,255,0.06)", borderRadius: 4, height: 10, overflow: "hidden" }}>
+        <div style={{
+          width: `${pct}%`, height: "100%",
+          background: highlight ? color : "rgba(255,255,255,0.2)",
+          borderRadius: 4, transition: "width 0.6s ease",
+        }} />
+      </div>
+      <div style={{ fontSize: 13, color: highlight ? "#fff" : "rgba(255,255,255,0.4)", fontFamily: "'DM Mono', monospace", width: 28, textAlign: "right" }}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function StatBadge({ p, chi2, df, label }) {
+  const isRandom = parseFloat(p) >= 0.05;
+  return (
+    <div style={{
+      background: isRandom ? "rgba(5, 122, 85, 0.15)" : "rgba(217, 119, 6, 0.15)",
+      border: `1px solid ${isRandom ? "rgba(5,122,85,0.4)" : "rgba(217,119,6,0.4)"}`,
+      borderRadius: 12, padding: "14px 18px", marginBottom: 16,
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+        <div style={{
+          width: 10, height: 10, borderRadius: "50%",
+          background: isRandom ? "#057a55" : "#d97706",
+          boxShadow: `0 0 8px ${isRandom ? "#057a55" : "#d97706"}`,
+        }} />
+        <span style={{
+          fontSize: 12, fontFamily: "'DM Mono', monospace",
+          color: isRandom ? "#6ee7b7" : "#fcd34d", letterSpacing: "0.08em"
+        }}>
+          {isRandom ? "RANDOM  ·  no bias detected" : "BIAS DETECTED  ·  non-uniform"}
+        </span>
+      </div>
+      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", fontFamily: "'DM Mono', monospace", lineHeight: 1.8 }}>
+        {label} &nbsp;·&nbsp; χ²({df}) = {chi2} &nbsp;·&nbsp; p = {p}
+        {!isRandom && <span style={{ color: "#fcd34d" }}> &lt; 0.05</span>}
+      </div>
+    </div>
+  );
+}
+
+function ClearDataButton({ onClear }) {
+  const [confirm, setConfirm] = useState(false);
+  return (
+    <div style={{ marginTop: 16, display: "flex", justifyContent: "center" }}>
+      {!confirm ? (
+        <button onClick={() => setConfirm(true)} style={{
+          background: "transparent", border: "1px solid rgba(255,80,80,0.25)",
+          color: "rgba(255,100,100,0.5)", borderRadius: 8,
+          padding: "7px 18px", cursor: "pointer", fontSize: 11,
+          fontFamily: "'DM Mono', monospace", letterSpacing: "0.05em",
+          transition: "all 0.2s",
+        }}>
+          ⚠ Clear all data
+        </button>
+      ) : (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 10,
+          background: "rgba(255,50,50,0.08)", border: "1px solid rgba(255,80,80,0.3)",
+          borderRadius: 10, padding: "10px 16px",
+          animation: "slideUp 0.2s ease both",
+        }}>
+          <span style={{ fontSize: 12, color: "rgba(255,150,150,0.8)", fontFamily: "'DM Mono', monospace" }}>
+            Delete all responses?
+          </span>
+          <button onClick={() => setConfirm(false)} style={{
+            background: "transparent", border: "1px solid rgba(255,255,255,0.15)",
+            color: "rgba(255,255,255,0.4)", borderRadius: 6,
+            padding: "4px 12px", cursor: "pointer", fontSize: 11,
+          }}>Cancel</button>
+          <button onClick={() => { onClear(); setConfirm(false); }} style={{
+            background: "rgba(220,38,38,0.8)", border: "none",
+            color: "#fff", borderRadius: 6,
+            padding: "4px 12px", cursor: "pointer", fontSize: 11, fontWeight: 600,
+          }}>Delete</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function App() {
+  const [tab, setTab] = useState("phase1");
+  const [phase1Picks, setPhase1Picks] = useState([]);
+  const [phase2Picks, setPhase2Picks] = useState([]);
+  const [currentPick1, setCurrentPick1] = useState(null);
+  const [currentPick2, setCurrentPick2] = useState(null);
+  const [showConfirm1, setShowConfirm1] = useState(false);
+  const [showConfirm2, setShowConfirm2] = useState(false);
+  const [userDone1, setUserDone1] = useState(false);
+  const [userDone2, setUserDone2] = useState(false);
+  const [userChoice1, setUserChoice1] = useState(null);
+  const [userChoice2, setUserChoice2] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const r1 = await window.storage.get("picks_phase1");
+        if (r1) setPhase1Picks(JSON.parse(r1.value));
+      } catch (_) {}
+      try {
+        const r2 = await window.storage.get("picks_phase2");
+        if (r2) setPhase2Picks(JSON.parse(r2.value));
+      } catch (_) {}
+      try {
+        const s1 = sessionStorage.getItem("user_pick1");
+        const s2 = sessionStorage.getItem("user_pick2");
+        if (s1 !== null) { setUserDone1(true); setUserChoice1(parseInt(s1)); }
+        if (s2 !== null) { setUserDone2(true); setUserChoice2(parseInt(s2)); }
+        if (s1 !== null && s2 === null) setTab("phase2");
+        else if (s1 !== null && s2 !== null) setTab("results");
+      } catch (_) {}
+    })();
+  }, []);
+
+  const savePicks = async (key, arr) => {
+    try { await window.storage.set(key, JSON.stringify(arr), true); } catch (_) {}
+  };
+
+  const clearAllData = async () => {
+    try { await window.storage.set("picks_phase1", "[]", true); } catch (_) {}
+    try { await window.storage.set("picks_phase2", "[]", true); } catch (_) {}
+    try { sessionStorage.removeItem("user_pick1"); sessionStorage.removeItem("user_pick2"); } catch (_) {}
+    setPhase1Picks([]); setPhase2Picks([]);
+    setUserDone1(false); setUserDone2(false);
+    setUserChoice1(null); setUserChoice2(null);
+    setCurrentPick1(null); setCurrentPick2(null);
+    setShowConfirm1(false); setShowConfirm2(false);
+    setTab("phase1");
+  };
+
+  const handlePick1 = (i) => {
+    if (userDone1) return;
+    setCurrentPick1(i);
+    setShowConfirm1(true);
+  };
+  const handlePick2 = (i) => {
+    if (userDone2) return;
+    setCurrentPick2(i);
+    setShowConfirm2(true);
+  };
+
+  const confirmPick1 = () => {
+    const updated = [...phase1Picks, currentPick1];
+    setPhase1Picks(updated);
+    savePicks("picks_phase1", updated);
+    setUserDone1(true);
+    setUserChoice1(currentPick1);
+    try { sessionStorage.setItem("user_pick1", currentPick1); } catch (_) {}
+    setCurrentPick1(null);
+    setShowConfirm1(false);
+    setTimeout(() => setTab("phase2"), 700);
+  };
+  const confirmPick2 = () => {
+    const updated = [...phase2Picks, currentPick2];
+    setPhase2Picks(updated);
+    savePicks("picks_phase2", updated);
+    setUserDone2(true);
+    setUserChoice2(currentPick2);
+    try { sessionStorage.setItem("user_pick2", currentPick2); } catch (_) {}
+    setCurrentPick2(null);
+    setShowConfirm2(false);
+    setTimeout(() => setTab("results"), 700);
+  };
+
+  const resetPick1 = () => { setCurrentPick1(null); setShowConfirm1(false); };
+  const resetPick2 = () => { setCurrentPick2(null); setShowConfirm2(false); };
+
+  // Chi-square
+  const counts1 = Array(CIRCLE_COUNT).fill(0);
+  phase1Picks.forEach(p => counts1[p]++);
+  const counts2 = Array(CIRCLE_COUNT).fill(0);
+  phase2Picks.forEach(p => counts2[p]++);
+
+  const n1 = phase1Picks.length, n2 = phase2Picks.length;
+  const expected1 = Array(CIRCLE_COUNT).fill(n1 / CIRCLE_COUNT);
+  const expected2 = Array(CIRCLE_COUNT).fill(n2 / CIRCLE_COUNT);
+
+  const stat1 = n1 >= 5 ? chiSquareTest(counts1, expected1) : null;
+  const stat2 = n2 >= 5 ? chiSquareTest(counts2, expected2) : null;
+  const max1 = Math.max(...counts1, 1);
+  const max2 = Math.max(...counts2, 1);
+
+  return (
+    <div style={{
+      minHeight: "100vh",
+      background: "#0a0a0f",
+      fontFamily: "'DM Sans', sans-serif",
+      color: "#fff",
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+    }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=DM+Sans:wght@300;400;500;600&family=Playfair+Display:ital,wght@0,700;1,700&display=swap');
+        @keyframes fadeIn { from { opacity: 0; transform: translate(-50%,-50%) scale(0.7); } to { opacity: 1; transform: translate(-50%,-50%) scale(1); } }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(255,255,255,0.1); } 50% { box-shadow: 0 0 0 8px rgba(255,255,255,0.0); } }
+        * { box-sizing: border-box; }
+        ::-webkit-scrollbar { width: 4px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+      `}</style>
+
+      {/* Header */}
+      <div style={{
+        width: "100%", maxWidth: 560,
+        padding: "40px 24px 0",
+        animation: "slideUp 0.5s ease both",
+      }}>
+        <div style={{
+          fontSize: 11, letterSpacing: "0.2em", color: "rgba(255,255,255,0.3)",
+          fontFamily: "'DM Mono', monospace", marginBottom: 8, textTransform: "uppercase"
+        }}>
+          Perceptual Bias Study
+        </div>
+        <h1 style={{
+          fontFamily: "'Playfair Display', serif",
+          fontStyle: "italic",
+          fontSize: 30, margin: 0, fontWeight: 700,
+          background: "linear-gradient(135deg, #fff 0%, rgba(255,255,255,0.5) 100%)",
+          WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
+          lineHeight: 1.2,
+        }}>
+          The Colour Choice Experiment
+        </h1>
+        <p style={{
+          fontSize: 13, color: "rgba(255,255,255,0.35)", margin: "10px 0 0",
+          lineHeight: 1.6, fontWeight: 300,
+        }}>
+          Two rounds · {n1 + n2} total responses collected
+        </p>
+      </div>
+
+      {/* Tabs */}
+      <div style={{
+        display: "flex", gap: 4, margin: "28px 0 0",
+        background: "rgba(255,255,255,0.04)",
+        border: "1px solid rgba(255,255,255,0.08)",
+        borderRadius: 14, padding: 4,
+        animation: "slideUp 0.5s 0.1s ease both", opacity: 0,
+        animationFillMode: "forwards",
+      }}>
+        {[
+          { id: "phase1", label: "Phase 1", sub: "Position", done: userDone1, unlocked: true },
+          { id: "phase2", label: "Phase 2", sub: "Colour", done: userDone2, unlocked: userDone1 },
+          { id: "results", label: "Results", sub: "Analysis", done: false, unlocked: userDone1 && userDone2 },
+        ].map(t => (
+          <button
+            key={t.id}
+            onClick={() => t.unlocked && setTab(t.id)}
+            style={{
+              background: tab === t.id ? "rgba(255,255,255,0.1)" : "transparent",
+              border: tab === t.id ? "1px solid rgba(255,255,255,0.15)" : "1px solid transparent",
+              borderRadius: 10, padding: "8px 20px",
+              cursor: t.unlocked ? "pointer" : "default",
+              color: tab === t.id ? "#fff" : t.unlocked ? "rgba(255,255,255,0.4)" : "rgba(255,255,255,0.15)",
+              transition: "all 0.2s",
+              display: "flex", flexDirection: "column", alignItems: "center", gap: 1,
+            }}
+          >
+            <span style={{ fontSize: 13, fontWeight: 500, display: "flex", alignItems: "center", gap: 5 }}>
+              {t.label}
+              {t.done && <span style={{ color: "#6ee7b7", fontSize: 10 }}>✓</span>}
+            </span>
+            <span style={{ fontSize: 10, fontFamily: "'DM Mono', monospace", letterSpacing: "0.05em", opacity: 0.6 }}>{t.sub}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* Main Content */}
+      <div style={{
+        width: "100%", maxWidth: 560, padding: "28px 24px 60px",
+        animation: "slideUp 0.4s ease both",
+        key: tab,
+      }}>
+
+        {/* PHASE 1 */}
+        {tab === "phase1" && (
+          <div>
+            <div style={{
+              background: userDone1 ? "rgba(5,122,85,0.08)" : "rgba(255,255,255,0.03)",
+              border: `1px solid ${userDone1 ? "rgba(5,122,85,0.25)" : "rgba(255,255,255,0.08)"}`,
+              borderRadius: 18, padding: "20px 20px 16px",
+              marginBottom: 20, transition: "all 0.4s ease",
+            }}>
+              {userDone1 ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <div style={{
+                    width: 32, height: 32, borderRadius: "50%",
+                    background: "rgba(5,122,85,0.3)", border: "1px solid rgba(5,122,85,0.5)",
+                    display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                  }}>
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                      <polyline points="2,7 5,10 12,3" stroke="#6ee7b7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 13, color: "#6ee7b7", fontWeight: 500 }}>Response recorded — Position {userChoice1 + 1}</div>
+                    <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", fontFamily: "'DM Mono', monospace", marginTop: 2 }}>
+                      One response per session · heading to Phase 2…
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", lineHeight: 1.7 }}>
+                  All circles are identical. Pick whichever one <em>feels right</em> — there are no wrong answers.
+                </div>
+              )}
+            </div>
+
+            <div style={{
+              background: "rgba(255,255,255,0.02)",
+              border: "1px solid rgba(255,255,255,0.06)",
+              borderRadius: 20, padding: "32px 0",
+              opacity: userDone1 ? 0.45 : 1, transition: "opacity 0.4s ease",
+              pointerEvents: userDone1 ? "none" : "auto",
+            }}>
+              <CircleArena
+                phase={1}
+                onPick={handlePick1}
+                picked={userDone1 ? userChoice1 : currentPick1}
+                total={n1}
+              />
+            </div>
+
+            {showConfirm1 && !userDone1 && (
+              <div style={{
+                marginTop: 20,
+                background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(255,255,255,0.1)",
+                borderRadius: 14, padding: "16px 20px",
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+                animation: "slideUp 0.25s ease both",
+              }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 500 }}>Position {currentPick1 + 1} selected</div>
+                  <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", fontFamily: "'DM Mono', monospace", marginTop: 2 }}>
+                    This is your one pick — confirm to lock it in
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={resetPick1} style={{
+                    background: "transparent", border: "1px solid rgba(255,255,255,0.15)",
+                    color: "rgba(255,255,255,0.5)", borderRadius: 8,
+                    padding: "7px 14px", cursor: "pointer", fontSize: 12,
+                  }}>Redo</button>
+                  <button onClick={confirmPick1} style={{
+                    background: "#fff", border: "none",
+                    color: "#000", borderRadius: 8,
+                    padding: "7px 18px", cursor: "pointer", fontSize: 12, fontWeight: 600,
+                  }}>Confirm</button>
+                </div>
+              </div>
+            )}
+
+            <div style={{ marginTop: 16, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", fontFamily: "'DM Mono', monospace" }}>
+                {n1} response{n1 !== 1 ? "s" : ""} recorded
+              </div>
+              {userDone1 && (
+                <button onClick={() => setTab("phase2")} style={{
+                  background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.2)",
+                  color: "#fff", borderRadius: 8,
+                  padding: "6px 16px", cursor: "pointer", fontSize: 12,
+                }}>
+                  Phase 2 →
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* PHASE 2 */}
+        {tab === "phase2" && (
+          <div>
+            <div style={{
+              background: userDone2 ? "rgba(5,122,85,0.08)" : "rgba(255,255,255,0.03)",
+              border: `1px solid ${userDone2 ? "rgba(5,122,85,0.25)" : "rgba(255,255,255,0.08)"}`,
+              borderRadius: 18, padding: "20px 20px 16px",
+              marginBottom: 20, transition: "all 0.4s ease",
+            }}>
+              {userDone2 ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <div style={{
+                    width: 32, height: 32, borderRadius: "50%",
+                    background: COLORS[userChoice2].hex,
+                    border: "2px solid rgba(255,255,255,0.3)",
+                    flexShrink: 0,
+                  }} />
+                  <div>
+                    <div style={{ fontSize: 13, color: "#6ee7b7", fontWeight: 500 }}>Response recorded — {COLORS[userChoice2].name}</div>
+                    <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", fontFamily: "'DM Mono', monospace", marginTop: 2 }}>
+                      One response per session · see your results below…
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", lineHeight: 1.7 }}>
+                  Now each circle has a different colour. Pick the one you're most drawn to.
+                </div>
+              )}
+            </div>
+
+            <div style={{
+              background: "rgba(255,255,255,0.02)",
+              border: "1px solid rgba(255,255,255,0.06)",
+              borderRadius: 20, padding: "32px 0",
+              opacity: userDone2 ? 0.45 : 1, transition: "opacity 0.4s ease",
+              pointerEvents: userDone2 ? "none" : "auto",
+            }}>
+              <CircleArena
+                phase={2}
+                onPick={handlePick2}
+                picked={userDone2 ? userChoice2 : currentPick2}
+                total={n2}
+              />
+            </div>
+
+            {showConfirm2 && !userDone2 && (
+              <div style={{
+                marginTop: 20,
+                background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(255,255,255,0.1)",
+                borderRadius: 14, padding: "16px 20px",
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+                animation: "slideUp 0.25s ease both",
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <div style={{
+                    width: 28, height: 28, borderRadius: "50%",
+                    background: COLORS[currentPick2].hex,
+                    border: "2px solid rgba(255,255,255,0.2)",
+                    flexShrink: 0,
+                  }} />
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 500 }}>{COLORS[currentPick2].name}</div>
+                    <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", fontFamily: "'DM Mono', monospace", marginTop: 2 }}>
+                      This is your one pick — confirm to lock it in
+                    </div>
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={resetPick2} style={{
+                    background: "transparent", border: "1px solid rgba(255,255,255,0.15)",
+                    color: "rgba(255,255,255,0.5)", borderRadius: 8,
+                    padding: "7px 14px", cursor: "pointer", fontSize: 12,
+                  }}>Redo</button>
+                  <button onClick={confirmPick2} style={{
+                    background: "#fff", border: "none",
+                    color: "#000", borderRadius: 8,
+                    padding: "7px 18px", cursor: "pointer", fontSize: 12, fontWeight: 600,
+                  }}>Confirm</button>
+                </div>
+              </div>
+            )}
+
+            <div style={{ marginTop: 16, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", fontFamily: "'DM Mono', monospace" }}>
+                {n2} response{n2 !== 1 ? "s" : ""} recorded
+              </div>
+              {userDone2 && (
+                <button onClick={() => setTab("results")} style={{
+                  background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.2)",
+                  color: "#fff", borderRadius: 8,
+                  padding: "6px 16px", cursor: "pointer", fontSize: 12,
+                }}>
+                  View Results →
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* RESULTS */}
+        {tab === "results" && (
+          <div>
+            {/* Phase 1 results */}
+            <div style={{
+              background: "rgba(255,255,255,0.02)",
+              border: "1px solid rgba(255,255,255,0.07)",
+              borderRadius: 18, padding: "22px 22px",
+              marginBottom: 16,
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 16 }}>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 600 }}>Phase 1 — Position Bias</div>
+                  <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", fontFamily: "'DM Mono', monospace", marginTop: 2 }}>
+                    {n1} picks · {CIRCLE_COUNT} positions
+                  </div>
+                </div>
+                <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", fontFamily: "'DM Mono', monospace" }}>
+                  expected {n1 > 0 ? (n1/CIRCLE_COUNT).toFixed(1) : "—"} per slot
+                </div>
+              </div>
+
+              {n1 >= 5 && stat1 && <StatBadge {...stat1} label="Position uniformity" />}
+              {n1 < 5 && (
+                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.3)", fontFamily: "'DM Mono', monospace", marginBottom: 12 }}>
+                  Need at least 5 responses for χ² test
+                </div>
+              )}
+
+              {Array.from({ length: CIRCLE_COUNT }, (_, i) => (
+                <Bar key={i} label={`Position ${i+1}`} value={counts1[i]} max={max1} color="#6b7280" highlight={counts1[i] === max1 && max1 > 0} />
+              ))}
+            </div>
+
+            {/* Phase 2 results */}
+            <div style={{
+              background: "rgba(255,255,255,0.02)",
+              border: "1px solid rgba(255,255,255,0.07)",
+              borderRadius: 18, padding: "22px 22px",
+              marginBottom: 16,
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 16 }}>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 600 }}>Phase 2 — Colour Preference</div>
+                  <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", fontFamily: "'DM Mono', monospace", marginTop: 2 }}>
+                    {n2} picks · {CIRCLE_COUNT} colours
+                  </div>
+                </div>
+                <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", fontFamily: "'DM Mono', monospace" }}>
+                  expected {n2 > 0 ? (n2/CIRCLE_COUNT).toFixed(1) : "—"} per colour
+                </div>
+              </div>
+
+              {n2 >= 5 && stat2 && <StatBadge {...stat2} label="Colour uniformity" />}
+              {n2 < 5 && (
+                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.3)", fontFamily: "'DM Mono', monospace", marginBottom: 12 }}>
+                  Need at least 5 responses for χ² test
+                </div>
+              )}
+
+              {COLORS.map((c, i) => (
+                <Bar key={i} label={c.name} value={counts2[i]} max={max2} color={c.hex} highlight={counts2[i] === max2 && max2 > 0} />
+              ))}
+            </div>
+
+            {/* Legend */}
+            <div style={{
+              background: "rgba(255,255,255,0.02)",
+              border: "1px solid rgba(255,255,255,0.06)",
+              borderRadius: 14, padding: "16px 20px",
+              fontSize: 12, color: "rgba(255,255,255,0.35)", lineHeight: 1.8,
+            }}>
+              <div style={{ marginBottom: 8, fontWeight: 500, color: "rgba(255,255,255,0.5)" }}>How to read this</div>
+              <div>
+                <span style={{ color: "#6ee7b7" }}>● Green</span> — p ≥ 0.05, picks look random, no evidence of bias
+              </div>
+              <div>
+                <span style={{ color: "#fcd34d" }}>● Orange</span> — p &lt; 0.05, picks are non-uniform, bias detected
+              </div>
+              <div style={{ marginTop: 6, color: "rgba(255,255,255,0.25)" }}>
+                Responses accumulate across all users. Share this interface to collect a larger sample — 30+ responses makes the chi-square test statistically meaningful.
+              </div>
+            </div>
+
+            {/* Clear data */}
+            <ClearDataButton onClear={clearAllData} />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
